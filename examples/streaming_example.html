@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Streaming Implementation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .api-key-section {
+            margin-bottom: 25px;
+            padding: 20px;
+            background: #e3f2fd;
+            border-radius: 8px;
+            border-left: 4px solid #2196f3;
+        }
+        .api-key-section h3 {
+            margin-top: 0;
+            color: #1565c0;
+        }
+        .api-key-input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        .api-key-input:focus {
+            border-color: #2196f3;
+            outline: none;
+        }
+        .key-status {
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        .key-status.valid {
+            color: #4caf50;
+        }
+        .key-status.invalid {
+            color: #f44336;
+        }
+        .input-section {
+            margin-bottom: 20px;
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            resize: vertical;
+        }
+        textarea:disabled {
+            background-color: #f5f5f5;
+            color: #999;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover:not(:disabled) {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .response-area {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 5px;
+            padding: 20px;
+            min-height: 200px;
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            line-height: 1.6;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .status.loading {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .info-box {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .info-box h4 {
+            margin-top: 0;
+            color: #856404;
+        }
+        .small-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>OpenRouter Streaming Chat</h1>
+        <p>This implementation uses OpenRouter API to access Inception Labs models with progressive streaming where each new token gets appended to build up the response.</p>
+
+        <div class="info-box">
+            <h4>🔑 Bring Your Own Key (BYOK)</h4>
+            <p>This application requires your own OpenRouter API key. Get one from <a href="https://openrouter.ai" target="_blank">openrouter.ai</a> and enter it below. Your key is stored only in your browser's memory and never sent anywhere except to OpenRouter's API.</p>
+        </div>
+
+        <div class="api-key-section">
+            <h3>OpenRouter API Configuration</h3>
+            <input
+                type="password"
+                id="apiKeyInput"
+                class="api-key-input"
+                placeholder="Enter your OpenRouter API key (sk-or-v1-...)"
+                onInput="validateApiKey()"
+            >
+            <div id="keyStatus" class="key-status"></div>
+            <div class="small-text">
+                <strong>Model:</strong> inception/mercury-coder-small-beta via OpenRouter<br>
+                <strong>Endpoint:</strong> https://openrouter.ai/api/v1/chat/completions
+            </div>
+        </div>
+
+        <div class="input-section">
+            <textarea
+                id="messageInput"
+                placeholder="Enter your message here..."
+                disabled
+            >What is a diffusion model?</textarea>
+            <br>
+            <button id="sendButton" onclick="sendStreamingMessage()" disabled>Send Message (Streaming)</button>
+        </div>
+
+        <div id="status" class="status" style="display: none;"></div>
+        <div id="response" class="response-area">Please enter your OpenRouter API key above to start chatting...</div>
+    </div>
+
+    <script>
+        const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+        const MODEL_NAME = 'inception/mercury-coder-small-beta';
+
+        let currentApiKey = '';
+
+        // validate key
+        function validateApiKey() {
+            const apiKeyInput = document.getElementById('apiKeyInput');
+            const keyStatus = document.getElementById('keyStatus');
+            const messageInput = document.getElementById('messageInput');
+            const sendButton = document.getElementById('sendButton');
+            const responseArea = document.getElementById('response');
+
+            const apiKey = apiKeyInput.value.trim();
+
+            const isValidFormat = apiKey.startsWith('sk-or-v1-') && apiKey.length > 20;
+
+            if (!apiKey) {
+                // No key entered
+                keyStatus.textContent = '';
+                keyStatus.className = 'key-status';
+                currentApiKey = '';
+                messageInput.disabled = true;
+                sendButton.disabled = true;
+                responseArea.textContent = 'Please enter your OpenRouter API key above to start chatting...';
+            } else if (isValidFormat) {
+                // Valid format
+                keyStatus.textContent = '✓ API key format looks valid';
+                keyStatus.className = 'key-status valid';
+                currentApiKey = apiKey;
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+                responseArea.textContent = 'Ready to chat! Enter your message and click Send.';
+            } else {
+                // Invalid format
+                keyStatus.textContent = '✗ API key should start with "sk-or-v1-" and be longer than 20 characters';
+                keyStatus.className = 'key-status invalid';
+                currentApiKey = '';
+                messageInput.disabled = true;
+                sendButton.disabled = true;
+                responseArea.textContent = 'Please enter a valid OpenRouter API key to continue...';
+            }
+        }
+
+        function showStatus(message, type = 'loading') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+            statusEl.style.display = 'block';
+        }
+
+        function hideStatus() {
+            const statusEl = document.getElementById('status');
+            statusEl.style.display = 'none';
+        }
+
+        //  handle streaming chat completion via OpenRouter
+        async function sendStreamingMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const responseArea = document.getElementById('response');
+            const sendButton = document.getElementById('sendButton');
+
+            if (!currentApiKey) {
+                showStatus('Please enter a valid OpenRouter API key first', 'error');
+                return;
+            }
+
+            // Get the user's message and validate it
+            const userMessage = messageInput.value.trim();
+            if (!userMessage) {
+                showStatus('Please enter a message', 'error');
+                return;
+            }
+
+            // Disable the send button and clear previous response
+            sendButton.disabled = true;
+            responseArea.textContent = '';
+            showStatus('Connecting to OpenRouter API...', 'loading');
+
+            try {
+                const response = await fetch(OPENROUTER_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${currentApiKey}`,
+
+                    },
+                    body: JSON.stringify({
+                        model: MODEL_NAME,
+                        messages: [
+                            { role: 'user', content: userMessage }
+                        ],
+                        max_tokens: 1000,
+                        stream: true   
+                    })
+                });
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        throw new Error('Invalid API key. Please check your OpenRouter API key.');
+                    } else if (response.status === 429) {
+                        throw new Error('Rate limit exceeded. Please wait a moment and try again.');
+                    } else {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                }
+
+                showStatus('Receiving streaming response...', 'loading');
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let accumulatedContent = '';  
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        showStatus('Response complete!', 'success');
+                        setTimeout(hideStatus, 2000); 
+                        break;
+                    }
+
+                    const chunk = decoder.decode(value);
+
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        const trimmedLine = line.trim();
+
+                        if (!trimmedLine || !trimmedLine.startsWith('data: ')) {
+                            continue;
+                        }
+                        if (trimmedLine === 'data: [DONE]') {
+                            continue;
+                        }
+
+                        const jsonStr = trimmedLine.substring(6);  
+
+                        if (!jsonStr.startsWith('{')) {
+                            continue;
+                        }
+
+                        try {
+                            const data = JSON.parse(jsonStr);
+
+                            for (const choice of data.choices || []) {
+                                if (choice.delta && choice.delta.content !== null && choice.delta.content !== undefined) {
+                                    const newContent = choice.delta.content;
+                                    accumulatedContent += newContent;
+                                    responseArea.textContent = accumulatedContent;
+
+                                    // auto-scroll 
+                                    responseArea.scrollTop = responseArea.scrollHeight;
+                                }
+                            }
+                        } catch (parseError) {
+                            console.error('JSON parsing error:', parseError);
+                        }
+                    }
+                }
+
+            } catch (error) {
+                console.error('Streaming error:', error);
+                showStatus(`Error: ${error.message}`, 'error');
+                responseArea.textContent = 'Sorry, an error occurred while processing your request. Please check your API key and try again.';
+            } finally {
+                sendButton.disabled = false;
+            }
+        }
+
+        // Allow sending message with Enter key (but not Shift+Enter for new lines)
+        document.getElementById('messageInput').addEventListener('keydown', function(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();  
+                if (!this.disabled) {
+                    sendStreamingMessage();
+                }
+            }
+        });
+
+        window.addEventListener('load', function() {
+            validateApiKey();  
+        });
+    </script>
+</body>
+</html>
