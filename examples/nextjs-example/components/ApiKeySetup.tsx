@@ -1,114 +1,155 @@
 'use client';
 
-import { useState } from 'react';
-import { Eye, EyeOff, Key, CheckCircle, AlertCircle } from 'lucide-react';
-import { ApiKeys } from '@/lib/types';
+import React, { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Key, CheckCircle, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { useAPIKeyStore } from '@/lib/stores';
+import { toast } from 'sonner';
+import { LoadingSpinner } from './ui/loading';
 
-interface ApiKeySetupProps {
-  apiKeys: ApiKeys;
-  onApiKeysChange: (keys: ApiKeys) => void;
-}
+export default function APIKeySetup() {
+  const { apiKeys, setApiKey, hasRequiredKeys } = useAPIKeyStore();
+  const [inceptionKey, setInceptionKey] = useState(apiKeys.inception || '');
+  const [showKey, setShowKey] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+  
+  const validateApiKey = useCallback(async (key: string): Promise<boolean> => {
+    if (!key || key.length < 10) {
+      toast.error('API key must be at least 10 characters long');
+      return false;
+    }
 
-export default function ApiKeySetup({ apiKeys, onApiKeysChange }: ApiKeySetupProps) {
-  const [showKeys, setShowKeys] = useState(false);
+    if (!key.startsWith('sk-') && !key.includes('_')) {
+      toast.error('Invalid API key format');
+      return false;
+    }
 
-  const updateKey = (provider: keyof ApiKeys, value: string) => {
-    onApiKeysChange({
-      ...apiKeys,
-      [provider]: value
-    });
-  };
+    return true;
+  }, []);
 
-  const isValidKey = (key: string | undefined) => {
-    return key && key.length > 10;
-  };
+  const handleSaveKeys = useCallback(async () => {
+    if (!inceptionKey.trim()) {
+      toast.error('Please enter your Inception Labs API key');
+      return;
+    }
+
+    const isValid = await validateApiKey(inceptionKey.trim());
+    if (!isValid) return;
+
+    setApiKey('inception', inceptionKey.trim());
+    toast.success('API key saved successfully!');
+  }, [inceptionKey, setApiKey, validateApiKey]);
+
+  const handleClearKey = useCallback(() => {
+    setInceptionKey('');
+    setApiKey('inception', '');
+    toast.info('API key cleared');
+  }, [setApiKey]);
 
   return (
-    <div className="bg-card rounded-xl border border-border shadow-sm p-6">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="p-2 bg-primary/10 rounded-lg">
-          <Key className="h-5 w-5 text-primary" />
+    <Card className="w-full max-w-md mx-auto">
+      <CardHeader className="text-center">
+        <div className="mx-auto w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mb-4">
+          <Key className="w-6 h-6 text-primary" />
         </div>
-        <div className="flex-1">
-          <h2 className="text-lg font-semibold text-card-foreground">API Configuration</h2>
-          <p className="text-sm text-muted-foreground">
-            Configure your Inception Labs API key for both streaming and diffusing modes
-          </p>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setShowKeys(!showKeys)}
-          className="text-muted-foreground hover:text-foreground"
-        >
-          {showKeys ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-        </Button>
-      </div>
+        <CardTitle className="text-2xl">API Key Setup</CardTitle>
+        <CardDescription>
+          Enter your Inception Labs API key to start chatting
+        </CardDescription>
+      </CardHeader>
       
-      <div className="space-y-4">
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-card-foreground">
-              Inception Labs API Key
-            </label>
-            {apiKeys.inception && (
-              <div className="flex items-center gap-1">
-                {isValidKey(apiKeys.inception) ? (
-                  <>
-                    <CheckCircle className="h-4 w-4 text-green-500" />
-                    <span className="text-xs text-green-600 dark:text-green-400">Valid</span>
-                  </>
-                ) : (
-                  <>
-                    <AlertCircle className="h-4 w-4 text-orange-500" />
-                    <span className="text-xs text-orange-600 dark:text-orange-400">Invalid</span>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-          <Input
-            type={showKeys ? 'text' : 'password'}
-            value={apiKeys.inception || ''}
-            onChange={(e) => updateKey('inception', e.target.value)}
-            placeholder="Enter your Inception Labs API key..."
-            className="w-full transition-all duration-200 focus:ring-2 focus:ring-primary/20"
-          />
-          <div className="flex items-start gap-2 text-xs text-muted-foreground">
-            <div className="flex-shrink-0 w-1 h-1 bg-muted-foreground rounded-full mt-2" />
-            <p>
-              This key will be used for both streaming and diffusing modes. 
-              Get your API key from the{' '}
-              <a 
-                href="https://api.inceptionlabs.ai" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-primary hover:underline"
-              >
-                Inception Labs dashboard
-              </a>
-            </p>
+      <CardContent className="space-y-6">
+        <div className="space-y-2">
+          <label htmlFor="inception-key" className="text-sm font-medium">
+            Inception Labs API Key
+          </label>
+          <div className="relative">
+            <Input
+              id="inception-key"
+              type={showKey ? 'text' : 'password'}
+              placeholder="sk-..."
+              value={inceptionKey}
+              onChange={(e) => setInceptionKey(e.target.value)}
+              className="pr-10"
+              disabled={isValidating}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+              onClick={() => setShowKey(!showKey)}
+              tabIndex={-1}
+            >
+              {showKey ? (
+                <EyeOff className="h-4 w-4" />
+              ) : (
+                <Eye className="h-4 w-4" />
+              )}
+            </Button>
           </div>
         </div>
 
-        <div className="pt-4 border-t border-border">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${
-              isValidKey(apiKeys.inception) 
-                ? 'bg-green-500 animate-pulse' 
-                : 'bg-gray-300 dark:bg-gray-600'
-            }`} />
-            <span className="text-sm text-muted-foreground">
-              {isValidKey(apiKeys.inception) 
-                ? 'Ready to chat' 
-                : 'Waiting for valid API key'
-              }
-            </span>
+        {hasRequiredKeys() && (
+          <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+            <CheckCircle className="w-4 h-4" />
+            <span>API key configured successfully</span>
           </div>
+        )}
+
+        <div className="flex gap-2">
+          <Button 
+            onClick={handleSaveKeys} 
+            className="flex-1"
+            disabled={!inceptionKey.trim() || isValidating}
+          >
+            {isValidating ? (
+              <>
+                <LoadingSpinner size="sm" />
+                <span className="ml-2">Validating...</span>
+              </>
+            ) : (
+              'Save Configuration'
+            )}
+          </Button>
+          
+          {hasRequiredKeys() && (
+            <Button 
+              onClick={handleClearKey}
+              variant="outline"
+              className="px-3"
+            >
+              Clear
+            </Button>
+          )}
         </div>
-      </div>
-    </div>
+
+        <div className="text-xs text-muted-foreground space-y-2">
+          <p>
+            <strong>Note:</strong> Your API key is stored locally in your browser and never sent to our servers.
+          </p>
+          <p>
+            Get your API key from{' '}
+            <a 
+              href="https://platform.inceptionlabs.ai/dashboard/api-keys" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              Inception Labs Dashboard
+            </a>
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   );
 } 

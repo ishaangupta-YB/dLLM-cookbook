@@ -1,52 +1,64 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
-import { Message, ApiKeys, ChatMode } from '@/lib/types';
-import MessageList from './MessageList';
-import MessageInput from './MessageInput';
-import ApiKeySetup from './ApiKeySetup';
-import { ModeToggle } from './mode-toggle';
+import { useCallback, useState, useEffect } from 'react';
+import { Zap, Waves, ChevronDown, Check, Settings, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Zap, Waves, Settings, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ModeToggle } from './mode-toggle';
+import { useAPIKeyStore, useChatModeStore, useChatStore } from '@/lib/stores';
+import { Message } from '@/lib/types';
+import Messages from './Messages';
+import ChatInput from './ChatInput';
+import APIKeySetup from './ApiKeySetup';
+import { ChatSkeleton, LoadingSpinner } from './ui/loading';
+import { toast } from 'sonner';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from './ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from './ui/dialog';
 
 export default function ChatInterface() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [mode, setMode] = useState<ChatMode>('streaming');
-  const [apiKeys, setApiKeys] = useState<ApiKeys>({});
-  const [showApiSetup, setShowApiSetup] = useState(true);
-  const messageIdRef = useRef(0);
+  const { hasRequiredKeys } = useAPIKeyStore();
+  const { mode, setMode } = useChatModeStore();
+  const { messages, isLoading, addMessage, updateMessage, setLoading, clearMessages } = useChatStore();
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [showApiKeyDialog, setShowApiKeyDialog] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [initializing, setInitializing] = useState(true);
 
-  const canChat = () => {
-    return !!apiKeys.inception;
-  };
-
-  const generateUniqueId = () => {
-    messageIdRef.current += 1;
-    return `msg_${Date.now()}_${messageIdRef.current}`;
-  };
-
-  const addMessage = useCallback((message: Omit<Message, 'id' | 'timestamp'>) => {
-    const newMessage: Message = {
-      ...message,
-      id: generateUniqueId(),
-      timestamp: new Date(),
-    };
-    setMessages(prev => [...prev, newMessage]);
-    return newMessage.id;
+  useEffect(() => {
+    setMounted(true);
+    const timer = setTimeout(() => {
+      setInitializing(false);
+    }, 500);  
+    
+    return () => clearTimeout(timer);
   }, []);
 
-  const updateMessage = useCallback((id: string, updates: Partial<Message>) => {
-    setMessages(prev => prev.map(msg => 
-      msg.id === id ? { ...msg, ...updates } : msg
-    ));
-  }, []);
+  const handleStop = useCallback(() => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+      setLoading(false);
+      toast.info('Response generation stopped');
+    }
+  }, [abortController, setLoading]);
 
-  const sendMessage = async (content: string) => {
-    if (!canChat()) return;
+  const sendMessage = useCallback(async (content: string) => {
+    if (!hasRequiredKeys() || isLoading) return;
 
-    setIsLoading(true);
+    setLoading(true);
+    
     addMessage({ role: 'user', content });
 
     const assistantMessageId = addMessage({ 
@@ -54,6 +66,9 @@ export default function ChatInterface() {
       content: '', 
       isStreaming: true 
     });
+
+    const controller = new AbortController();
+    setAbortController(controller);
 
     try {
       const response = await fetch('/api/chat', {
@@ -63,17 +78,46 @@ export default function ChatInterface() {
         },
         body: JSON.stringify({
           message: content,
-          messages: messages.map(msg => ({
+          messages: messages.map((msg: Message) => ({
             role: msg.role,
             content: msg.content
           })),
           mode,
-          apiKeys,
+          apiKeys: { inception: useAPIKeyStore.getState().apiKeys.inception },
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        let errorMessage = 'An error occurred while processing your request.';
+        
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.message || errorMessage;
+        } catch {
+          // Use default error message if parsing fails
+        }
+
+        if (response.status === 401) {
+          errorMessage = 'Invalid API key. Please check your credentials.';
+          toast.error('Authentication failed - Please check your API key');
+        } else if (response.status === 429) {
+          errorMessage = 'Rate limit exceeded. Please try again later.';
+          toast.error('Rate limit exceeded - Please wait before sending another message');
+        } else if (response.status >= 500) {
+          errorMessage = 'Server error occurred. Please try again.';
+          toast.error('Server error - Please try again');
+        } else {
+          toast.error(`Request failed: ${errorMessage}`);
+        }
+
+        updateMessage(assistantMessageId, {
+          content: `**Error:** ${errorMessage}`,
+          isStreaming: false,
+          isError: true
+        });
+        return;
       }
 
       const reader = response.body?.getReader();
@@ -99,6 +143,10 @@ export default function ChatInterface() {
             try {
               const data = JSON.parse(jsonStr);
               
+              if (data.error) {
+                throw new Error(data.error.message || 'Stream error occurred');
+              }
+              
               if (data.choices?.[0]?.delta?.content !== undefined) {
                 const newContent = data.choices[0].delta.content;
                 
@@ -117,138 +165,145 @@ export default function ChatInterface() {
                   });
                 }
               }
-            } catch (error) {
-              console.error('JSON parsing error:', error);
+            } catch (parseError: any) {
+              console.error('JSON parsing error:', parseError);
+              toast.error('Failed to parse response data');
             }
           }
         }
       }
 
       updateMessage(assistantMessageId, { isStreaming: false });
+      toast.success('Response completed');
 
-    } catch (error) {
+    } catch (error: any) {
+      let errorMessage = 'An unexpected error occurred.';
+      
+      if (error.name === 'AbortError') {
+        updateMessage(assistantMessageId, {
+          content: '**Response cancelled by user.**',
+          isStreaming: false
+        });
+        return; // Don't show error toast for user cancellation
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
       console.error('Chat error:', error);
+      toast.error(`Chat error: ${errorMessage}`);
+      
       updateMessage(assistantMessageId, {
-        content: 'Sorry, an error occurred while processing your request.',
-        isStreaming: false
+        content: `**Error:** ${errorMessage}`,
+        isStreaming: false,
+        isError: true
       });
     } finally {
-      setIsLoading(false);
+      setLoading(false);
+      setAbortController(null);
     }
-  };
+  }, [hasRequiredKeys, isLoading, messages, mode, addMessage, updateMessage, setLoading]);
+
+  // Show loading skeleton during initialization
+  if (!mounted || initializing) {
+    return (
+      <div className="flex flex-col h-screen bg-background">
+        <header className="border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-10">
+          <div className="max-w-5xl mx-auto px-6 py-4">
+            <div className="flex items-center justify-between">
+              <h1 className="text-2xl font-bold">
+                dLLM <span className="text-primary">Chat</span>
+              </h1>
+              <LoadingSpinner size="sm" />
+            </div>
+          </div>
+        </header>
+        <main className="flex-1 flex items-center justify-center p-4">
+          <div className="max-w-4xl w-full">
+            <ChatSkeleton />
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (!hasRequiredKeys()) {
+    return (
+      <div className="flex flex-col h-screen bg-background">
+        <header className="border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-10">
+          <div className="max-w-5xl mx-auto px-6 py-4">
+            <div className="flex items-center justify-between">
+              <h1 className="text-2xl font-bold">
+                dLLM <span className="text-primary">Chat</span>
+              </h1>
+              <ModeToggle />
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 flex items-center justify-center p-4">
+          <APIKeySetup />
+        </main>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col h-screen bg-background text-foreground">
-      <div className="bg-background/95 backdrop-blur-sm border-b border-border shadow-sm sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-3">
+    <div className="flex flex-col h-screen bg-background">
+      <header className="border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-10">
+        <div className="max-w-5xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-bold text-foreground">AI Chat Assistant</h1>
+            <h1 className="text-2xl font-bold">
+              dLLM <span className="text-primary">Chat</span>
+            </h1>
             
-            <div className="flex items-center gap-3">
-              <div className="flex bg-muted/50 rounded-lg p-1 border border-border/50">
+            <div className="flex items-center gap-4">
+              {messages.length > 0 && (
                 <Button
+                  onClick={() => {
+                    clearMessages();
+                    toast.success('Chat cleared');
+                  }}
                   variant="ghost"
                   size="sm"
-                  onClick={() => setMode('streaming')}
-                  className={cn(
-                    "flex items-center gap-2 transition-all duration-200 relative",
-                    mode === 'streaming' 
-                      ? 'bg-primary text-primary-foreground shadow-md scale-105' 
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/80'
-                  )}
+                  className="flex items-center gap-2 h-9 px-3 text-sm text-muted-foreground hover:text-foreground"
                 >
-                  <Zap className={cn("h-4 w-4", mode === 'streaming' && "animate-pulse")} />
-                  Streaming
-                  {mode === 'streaming' && (
-                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
-                  )}
+                  <Trash2 className="w-4 h-4" />
+                  Clear Chat
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setMode('diffusing')}
-                  className={cn(
-                    "flex items-center gap-2 transition-all duration-200 relative",
-                    mode === 'diffusing' 
-                      ? 'bg-green-600 text-white shadow-md scale-105 dark:bg-green-500' 
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/80'
-                  )}
-                >
-                  <Waves className={cn("h-4 w-4", mode === 'diffusing' && "animate-bounce")} />
-                  Diffusing
-                  {mode === 'diffusing' && (
-                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full animate-bounce" />
-                  )}
-                </Button>
-              </div>
+              )}
 
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowApiSetup(!showApiSetup)}
-                className={cn(
-                  "text-muted-foreground hover:text-foreground transition-all duration-200",
-                  showApiSetup && "bg-muted text-foreground"
-                )}
-              >
-                <Settings className={cn("h-4 w-4 mr-2", showApiSetup && "animate-spin")} />
-                API Setup
-                <ChevronDown className={cn("h-4 w-4 ml-2 transition-transform duration-200", showApiSetup && "rotate-180")} />
-              </Button>
+              <Dialog open={showApiKeyDialog} onOpenChange={setShowApiKeyDialog}>
+                <DialogTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="flex items-center gap-2 h-9 px-3 text-sm text-muted-foreground hover:text-foreground"
+                  >
+                    <Settings className="w-4 h-4" />
+                    Settings
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>API Key Settings</DialogTitle>
+                  </DialogHeader>
+                  <APIKeySetup />
+                </DialogContent>
+              </Dialog>
 
               <ModeToggle />
             </div>
           </div>
         </div>
-      </div>
+      </header>
 
-      <div className={cn(
-        "max-w-4xl mx-auto w-full px-4 transition-all duration-300 ease-in-out overflow-hidden",
-        showApiSetup ? "py-4 opacity-100" : "py-0 opacity-0 h-0"
-      )}>
-        <ApiKeySetup apiKeys={apiKeys} onApiKeysChange={setApiKeys} />
-      </div>
-
-      <div className="flex-1 max-w-4xl mx-auto w-full flex flex-col">
-        {messages.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <div className={cn(
-                "w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 transition-all duration-300",
-                mode === 'streaming' 
-                  ? 'bg-primary/10 text-primary animate-pulse' 
-                  : 'bg-green-500/10 text-green-600 dark:text-green-500 animate-bounce'
-              )}>
-                {mode === 'streaming' ? <Zap className="h-8 w-8" /> : <Waves className="h-8 w-8" />}
-              </div>
-              <h3 className="text-lg font-medium text-foreground mb-2">
-                {mode === 'streaming' ? 'Streaming Mode' : 'Diffusing Mode'}
-              </h3>
-              <p className="text-muted-foreground max-w-md">
-                {mode === 'streaming' 
-                  ? 'Experience progressive AI responses as they build up token by token via Inception Labs.'
-                  : 'Watch AI responses evolve and rewrite themselves in real-time via Inception Labs.'
-                }
-              </p>
-              {canChat() ? (
-                <p className="text-sm text-muted-foreground mt-4">Start a conversation below!</p>
-              ) : (
-                <p className="text-sm text-orange-600 mt-4 font-medium">
-                  Please set up your API key above to start chatting.
-                </p>
-              )}
-            </div>
-          </div>
-        ) : (
-          <MessageList messages={messages} mode={mode} />
-        )}
-      </div>
-
-      <MessageInput
-        onSendMessage={sendMessage}
-        isLoading={isLoading}
-        disabled={!canChat()}
-      />
+      <main className="flex-1 relative">
+        <div className="flex flex-col w-full max-w-4xl pt-12 pb-44 mx-auto px-6">
+          <Messages messages={messages} isLoading={isLoading} />
+        </div>
+        
+        <ChatInput onSendMessage={sendMessage} onStop={handleStop} disabled={isLoading} />
+      </main>
     </div>
   );
 } 
