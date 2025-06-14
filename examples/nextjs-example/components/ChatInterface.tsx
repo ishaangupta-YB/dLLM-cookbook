@@ -1,9 +1,8 @@
 'use client';
 
 import { useCallback, useState, useEffect } from 'react';
-import { Zap, Waves, ChevronDown, Check, Settings, Trash2 } from 'lucide-react';
+import { Settings, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import { ModeToggle } from './mode-toggle';
 import { useAPIKeyStore, useChatModeStore, useChatStore } from '@/lib/stores';
 import { Message } from '@/lib/types';
@@ -12,13 +11,7 @@ import ChatInput from './ChatInput';
 import APIKeySetup from './ApiKeySetup';
 import { ChatSkeleton, LoadingSpinner } from './ui/loading';
 import { toast } from 'sonner';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-} from './ui/dropdown-menu';
+
 import {
   Dialog,
   DialogContent,
@@ -29,7 +22,7 @@ import {
 
 export default function ChatInterface() {
   const { hasRequiredKeys } = useAPIKeyStore();
-  const { mode, setMode } = useChatModeStore();
+  const { mode } = useChatModeStore();
   const { messages, isLoading, addMessage, updateMessage, setLoading, clearMessages } = useChatStore();
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [showApiKeyDialog, setShowApiKeyDialog] = useState(false);
@@ -184,7 +177,7 @@ export default function ChatInterface() {
           content: '**Response cancelled by user.**',
           isStreaming: false
         });
-        return; // Don't show error toast for user cancellation
+        return;
       } else if (error.message) {
         errorMessage = error.message;
       }
@@ -203,7 +196,6 @@ export default function ChatInterface() {
     }
   }, [hasRequiredKeys, isLoading, messages, mode, addMessage, updateMessage, setLoading]);
 
-  // Show loading skeleton during initialization
   if (!mounted || initializing) {
     return (
       <div className="flex flex-col h-screen bg-background">
