@@ -152,7 +152,6 @@ def stream_response_with_tools(messages: list, api_key: str, tools_enabled: bool
 
         accumulated_content = ""
         tool_calls_data = []
-        current_tool_call = None
         
         for line in response.iter_lines():
             if line:
@@ -168,18 +167,16 @@ def stream_response_with_tools(messages: list, api_key: str, tools_enabled: bool
                                 choice = data['choices'][0]
                                 delta = choice.get('delta', {})
                                 
-                                # Handle regular content
                                 content = delta.get('content', '')
                                 if content:
                                     accumulated_content += content
                                     yield accumulated_content
                                 
-                                # Handle tool calls
-                                if 'tool_calls' in delta:
-                                    for tool_call in delta['tool_calls']:
+                                tool_calls = delta.get('tool_calls')
+                                if tool_calls is not None:
+                                    for tool_call in tool_calls:
                                         idx = tool_call.get('index', 0)
                                         
-                                        # Extend tool_calls_data if needed
                                         while len(tool_calls_data) <= idx:
                                             tool_calls_data.append({'function': {'name': '', 'arguments': ''}})
                                         
@@ -189,10 +186,8 @@ def stream_response_with_tools(messages: list, api_key: str, tools_enabled: bool
                                             if 'arguments' in tool_call['function']:
                                                 tool_calls_data[idx]['function']['arguments'] += tool_call['function']['arguments']
                                 
-                                # Check if we need to call tools
                                 finish_reason = choice.get('finish_reason')
                                 if finish_reason == 'tool_calls' and tool_calls_data:
-                                    # Execute tool calls
                                     for tool_call in tool_calls_data:
                                         if tool_call['function']['name'] == 'web_search':
                                             try:
@@ -241,6 +236,7 @@ def diffuse_response_with_tools(messages: list, api_key: str, tools_enabled: boo
             return
         
         current_content = ""
+        tool_calls_data = []
         
         for line in response.iter_lines():
             if line:
@@ -253,17 +249,48 @@ def diffuse_response_with_tools(messages: list, api_key: str, tools_enabled: boo
                         try:
                             data = json.loads(data_str)
                             if 'choices' in data and len(data['choices']) > 0:
-                                delta = data['choices'][0].get('delta', {})
+                                choice = data['choices'][0]
+                                delta = choice.get('delta', {})
+                                
                                 content = delta.get('content', '')
                                 if content is not None:
                                     current_content = content
                                     yield current_content
+                                
+                                tool_calls = delta.get('tool_calls')
+                                if tool_calls is not None:
+                                    for tool_call in tool_calls:
+                                        idx = tool_call.get('index', 0)
+                                        
+                                        while len(tool_calls_data) <= idx:
+                                            tool_calls_data.append({'function': {'name': '', 'arguments': ''}})
+                                        
+                                        if 'function' in tool_call:
+                                            if 'name' in tool_call['function']:
+                                                tool_calls_data[idx]['function']['name'] = tool_call['function']['name']
+                                            if 'arguments' in tool_call['function']:
+                                                tool_calls_data[idx]['function']['arguments'] += tool_call['function']['arguments']
+                                
+                                finish_reason = choice.get('finish_reason')
+                                if finish_reason == 'tool_calls' and tool_calls_data:
+                                    for tool_call in tool_calls_data:
+                                        if tool_call['function']['name'] == 'web_search':
+                                            try:
+                                                args = json.loads(tool_call['function']['arguments'])
+                                                query = args.get('query', '')
+                                                if query and st.session_state.tavily_api_key:
+                                                    yield current_content + "\n\n🔍 **Searching...**\n\n"
+                                                    search_result = search_web(query, st.session_state.tavily_api_key)
+                                                    yield current_content + f"\n\n{search_result}"
+                                            except:
+                                                yield current_content + "\n\n❌ **Search failed**\n\n"
+                                    return
+                                        
                         except json.JSONDecodeError:
                             continue
                             
     except Exception as e:
         yield f"Error: {str(e)}"
-
 st.title("🔧 AI Chat Assistant with Tools")
 st.markdown("*AI chat with web search capabilities*")
 
@@ -335,7 +362,6 @@ with st.sidebar:
     
     st.divider()
     
-    # Chat mode
     st.subheader("🔄 Chat Mode")
     mode = st.radio(
         "Select mode:",
@@ -353,7 +379,6 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
-# Chat interface
 tools_status = " + Web Search" if st.session_state.tools_enabled else ""
 st.subheader(f"💬 Chat ({st.session_state.chat_mode.title()} Mode{tools_status})")
 
@@ -369,7 +394,7 @@ if prompt := st.chat_input("Type your message here...", disabled=not (st.session
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
-    
+        
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         api_messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
