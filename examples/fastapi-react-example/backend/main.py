@@ -267,7 +267,6 @@ async def validate_api_key(request: ApiKeyValidation):
             },
             timeout=10
         )
-        
         if response.status_code == 200:
             return {"valid": True, "error": None}
         else:
