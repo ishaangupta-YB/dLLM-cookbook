@@ -6,6 +6,9 @@ This directory contains two Streamlit applications that demonstrate how to build
 
 ### 1. `app.py` - AI Chat Assistant
 
+## Demo Video
+https://github.com/user-attachments/assets/89611c5c-ae79-457c-bf7f-e44c80b260a2
+
 This is a versatile chat application that allows you to interact with the `mercury-coder` model. It showcases two different response generation modes:
 
 -   **Streaming Mode:** Tokens are appended to the response as they are generated, providing a classic chatbot experience.
@@ -19,6 +22,9 @@ This is a versatile chat application that allows you to interact with the `mercu
 -   Requires an Inception Labs API key.
 
 ### 2. `tool_use.py` - AI Chat with Tools
+
+## Demo Video
+https://github.com/user-attachments/assets/924422a9-847a-47b3-8535-a75b42d6351b
 
 This more advanced application demonstrates how to use "tools" with the `mercury-coder` model. It integrates a web search tool using the Tavily API, allowing the model to access real-time information from the internet to answer questions.
 
