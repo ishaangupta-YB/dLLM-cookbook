@@ -2,6 +2,9 @@
 
 This directory contains a full-featured chat application built with Next.js, TypeScript, and Tailwind CSS. It demonstrates how to build a modern, streaming-first chat interface for Inception Labs's dLLM models.
 
+## Demo Video
+https://github.com/user-attachments/assets/646b2b61-3ae7-42d8-91bd-28699df7b674
+
 ## Features
 
 -   **Modern Tech Stack:** Built with Next.js App Router, React, and TypeScript.
