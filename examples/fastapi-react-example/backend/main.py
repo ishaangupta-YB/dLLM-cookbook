@@ -82,7 +82,7 @@ def get_tool_calls_without_diffusing(messages: List[Dict], api_key: str) -> Tupl
             "messages": messages,
             "max_tokens": 800,
             "stream": True,
-            "diffusing": False,  # Key: No diffusing for tool calls
+            "diffusing": False,
             "tools": get_tools()
         }
         
@@ -198,7 +198,6 @@ def stream_inception_response(messages: List[Dict], api_key: str, diffusing: boo
                             except json.JSONDecodeError:
                                 continue
         else:
-            # Streaming mode  
             accumulated_content = ""
             tool_calls_data = []
             

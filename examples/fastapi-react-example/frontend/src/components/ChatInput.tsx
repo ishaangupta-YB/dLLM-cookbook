@@ -24,7 +24,6 @@ export default function ChatInput({ onSendMessage, onStop, disabled = false }: C
   const { mode, setMode } = useChatModeStore();
   const { isLoading, toolsEnabled, setToolsEnabled } = useChatStore();
 
-  // Only allow chat if API key is validated (not just present)
   const canSend = input.trim() && hasRequiredKeys() && validationResult?.valid === true && !isLoading && !disabled;
 
   const adjustHeight = useCallback(() => {

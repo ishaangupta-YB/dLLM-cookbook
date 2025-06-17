@@ -55,15 +55,10 @@ const ChatInterface = () => {
   }, [abortController, setLoading]);
 
   const sendMessage = useCallback(async (content: string) => {
-    // Only allow if API key is validated
     if (!hasRequiredKeys() || validationResult?.valid !== true || isLoading) return;
-
     setLoading(true);
-    
-    // Add user message
     addMessage({ role: 'user', content });
 
-    // Add initial assistant message
     const assistantMessageId = addMessage({ 
       role: 'assistant', 
       content: '', 
@@ -87,7 +82,7 @@ const ChatInterface = () => {
           mode,
           inception_api_key: apiKeys.inception,
           tavily_api_key: apiKeys.tavily || null,
-          tools_enabled: toolsEnabled && !!apiKeys.tavily, // Only enable if checkbox is checked AND tavily key exists
+          tools_enabled: toolsEnabled && !!apiKeys.tavily,
           max_tokens: 800,
         }),
         signal: controller.signal,
@@ -101,7 +96,6 @@ const ChatInterface = () => {
           const errorData = JSON.parse(errorText);
           errorMessage = errorData.error || errorMessage;
         } catch {
-          // Use default error message if parsing fails
         }
 
         if (response.status === 401) {
@@ -176,7 +170,6 @@ const ChatInterface = () => {
         }
       }
 
-      // Mark as complete
       updateMessage(assistantMessageId, { isStreaming: false });
       toast.success('Response completed');
 
