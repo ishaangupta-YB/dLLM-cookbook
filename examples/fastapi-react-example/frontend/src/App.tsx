@@ -6,9 +6,7 @@ import { Toaster } from '@/components/ui/sonner';
 function App() {
   return (
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-      <div className="App">
-        <ChatInterface />
-      </div>
+      <ChatInterface />
       <Toaster /> 
     </ThemeProvider>
   );

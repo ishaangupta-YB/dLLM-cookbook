@@ -1,10 +1,18 @@
 import { useEffect, useRef } from 'react';
+import { Bot, User, Zap, Waves } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { User, Bot, Zap, Waves } from 'lucide-react';
+import type { Message } from '@/lib/stores';
+import { useChatModeStore } from '@/lib/stores';
 
-const MessageList = ({ messages, mode, isStreaming }: { messages: { role: string; content: string; isStreaming: boolean }[], mode: string, isStreaming: boolean }) => {
+interface MessagesProps {
+  messages: Message[];
+  isLoading: boolean;
+}
+
+const Messages = ({ messages, isLoading }: MessagesProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { mode } = useChatModeStore();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -14,18 +22,42 @@ const MessageList = ({ messages, mode, isStreaming }: { messages: { role: string
     scrollToBottom();
   }, [messages]);
 
+  if (messages.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center">
+          <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
+            mode === 'streaming' ? 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300' : 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300'
+          }`}>
+            {mode === 'streaming' ? <Zap className="h-8 w-8" /> : <Waves className="h-8 w-8" />}
+          </div>
+          <h3 className="text-lg font-medium text-foreground mb-2">
+            {mode === 'streaming' ? 'Streaming Mode' : 'Diffusing Mode'}
+          </h3>
+          <p className="text-muted-foreground max-w-md">
+            {mode === 'streaming' 
+              ? 'Experience progressive AI responses as they build up token by token.'
+              : 'Watch AI responses evolve and rewrite themselves in real-time.'
+            }
+          </p>
+          <p className="text-sm text-muted-foreground mt-4">Start a conversation below!</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 overflow-y-auto space-y-6">
-      {messages.map((message, index) => (
+      {messages.map((message) => (
         <div
-          key={index}
+          key={message.id}
           className={`flex items-start gap-4 ${
             message.role === 'user' ? 'justify-end' : 'justify-start'
           }`}
         >
           {message.role === 'assistant' && (
             <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-              mode === 'streaming' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'
+              mode === 'streaming' ? 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300' : 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300'
             }`}>
               <Bot className="h-4 w-4" />
             </div>
@@ -35,6 +67,8 @@ const MessageList = ({ messages, mode, isStreaming }: { messages: { role: string
             className={`max-w-[75%] rounded-lg px-4 py-3 ${
               message.role === 'user'
                 ? 'bg-primary text-primary-foreground'
+                : message.isError
+                ? 'bg-destructive/10 text-destructive border border-destructive/20'
                 : mode === 'streaming'
                 ? 'bg-muted text-muted-foreground'
                 : 'bg-accent text-accent-foreground border-l-4 border-green-400'
@@ -67,6 +101,9 @@ const MessageList = ({ messages, mode, isStreaming }: { messages: { role: string
                         {children}
                       </blockquote>
                     ),
+                    h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
+                    h2: ({ children }) => <h2 className="text-base font-bold mb-2">{children}</h2>,
+                    h3: ({ children }) => <h3 className="text-sm font-bold mb-2">{children}</h3>,
                   }}
                 >
                   {message.content}
@@ -100,10 +137,11 @@ const MessageList = ({ messages, mode, isStreaming }: { messages: { role: string
           )}
         </div>
       ))}
-      {isStreaming && (
+      
+      {isLoading && messages.length > 0 && !messages[messages.length - 1]?.isStreaming && (
         <div className="flex items-start gap-4">
           <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-            mode === 'streaming' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'
+            mode === 'streaming' ? 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300' : 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300'
           }`}>
             <Bot className="h-4 w-4" />
           </div>
@@ -133,4 +171,4 @@ const MessageList = ({ messages, mode, isStreaming }: { messages: { role: string
   );
 };
 
-export default MessageList;
+export default Messages; 

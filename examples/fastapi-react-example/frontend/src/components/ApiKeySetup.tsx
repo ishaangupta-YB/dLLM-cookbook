@@ -1,15 +1,54 @@
 import { useState } from 'react';
 import { Eye, EyeOff, Key } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useAPIKeyStore } from '@/lib/stores';
 
-const ApiKeySetup = ({ apiKeys, onApiKeysChange, onValidate, validationStatus }: { apiKeys: { inception: string; tavily: string }, onApiKeysChange: (apiKeys: { inception: string; tavily: string }) => void, onValidate: (apiKey: string) => void, validationStatus: { validating: boolean; result: { valid: boolean; error?: string } | null } }) => {
+const API_BASE_URL = 'http://localhost:8000';
+
+const ApiKeySetup = () => {
   const [showKeys, setShowKeys] = useState(false);
+  const { 
+    apiKeys, 
+    setAPIKey, 
+    hasRequiredKeys,
+    isValidating,
+    validationResult,
+    setValidating,
+    setValidationResult
+  } = useAPIKeyStore();
 
-  const updateKey = (provider: string, value: string) => {
-    onApiKeysChange({
-      ...apiKeys,
-      [provider]: value
-    });
+  const validateApiKey = async (apiKey: string) => {
+    if (!apiKey) return;
+    
+    setValidating(true);
+    setValidationResult(null);
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/validate-api-key`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ api_key: apiKey }),
+      });
+      
+      const result = await response.json();
+      setValidationResult(result);
+      
+      if (result.valid) {
+        console.log('API key validated successfully!');
+      } else {
+        console.error(`API key validation failed: ${result.error}`);
+      }
+    } catch (error) {
+      setValidationResult({
+        valid: false,
+        error: 'Network error'
+      });
+      console.error('Network error during validation');
+    } finally {
+      setValidating(false);
+    }
   };
 
   return (
@@ -35,7 +74,7 @@ const ApiKeySetup = ({ apiKeys, onApiKeysChange, onValidate, validationStatus }:
           <input
             type={showKeys ? 'text' : 'password'}
             value={apiKeys.inception || ''}
-            onChange={(e) => updateKey('inception', e.target.value)}
+            onChange={(e) => setAPIKey('inception', e.target.value)}
             placeholder="Enter your Inception Labs API key..."
             className="w-full px-4 py-2 border border-border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-ring focus:border-transparent"
           />
@@ -48,7 +87,7 @@ const ApiKeySetup = ({ apiKeys, onApiKeysChange, onValidate, validationStatus }:
           <input
             type={showKeys ? 'text' : 'password'}
             value={apiKeys.tavily || ''}
-            onChange={(e) => updateKey('tavily', e.target.value)}
+            onChange={(e) => setAPIKey('tavily', e.target.value)}
             placeholder="Enter your Tavily API key..."
             className="w-full px-4 py-2 border border-border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-ring focus:border-transparent"
           />
@@ -57,20 +96,20 @@ const ApiKeySetup = ({ apiKeys, onApiKeysChange, onValidate, validationStatus }:
 
         <div className="flex gap-2">
           <Button
-            onClick={() => onValidate(apiKeys.inception)}
-            disabled={!apiKeys.inception || validationStatus.validating}
+            onClick={() => validateApiKey(apiKeys.inception)}
+            disabled={!apiKeys.inception || isValidating}
             className="flex-1"
           >
-            {validationStatus.validating ? 'Validating...' : 'Validate API Key'}
+            {isValidating ? 'Validating...' : 'Validate API Key'}
           </Button>
         </div>
 
-        {validationStatus.result !== null && (
-          <div className={`p-3 rounded-lg border ${validationStatus.result.valid 
-            ? 'bg-green-50 border-green-200 text-green-800' 
-            : 'bg-red-50 border-red-200 text-red-800'
+        {validationResult !== null && (
+          <div className={`p-3 rounded-lg border ${validationResult.valid 
+            ? 'bg-green-50 border-green-200 text-green-800 dark:bg-green-900/20 dark:border-green-800 dark:text-green-300' 
+            : 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/20 dark:border-red-800 dark:text-red-300'
           }`}>
-            {validationStatus.result.valid ? '✅ API key is valid' : `❌ ${validationStatus.result.error}`}
+            {validationResult.valid ? '✅ API key is valid' : `❌ ${validationResult.error}`}
           </div>
         )}
       </div>

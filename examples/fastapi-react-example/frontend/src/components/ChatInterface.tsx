@@ -1,8 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import MessageList from './MessageList';
-import MessageInput from './MessageInput';
-import ApiKeySetup from './ApiKeySetup';
-import { Zap, Waves, Settings, Trash2 } from 'lucide-react';
+import { Settings, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ModeToggle } from './mode-toggle';
 import { toast } from 'sonner';
@@ -13,92 +10,58 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import Messages from './Messages';
+import ChatInput from './ChatInput';
+import ApiKeySetup from './ApiKeySetup';
+import LoadingSkeleton from './LoadingSkeleton';
+import { useAPIKeyStore, useChatModeStore, useChatStore } from '@/lib/stores';
 
 const API_BASE_URL = 'http://localhost:8000';
 
 const ChatInterface = () => {
-  const [messages, setMessages] = useState<{ role: string; content: string; isStreaming: boolean }[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [mode, setMode] = useState('streaming');
-  const [apiKeys, setApiKeys] = useState({ inception: '', tavily: '' });
-  const [showApiSetup, setShowApiSetup] = useState(false);
-  const [toolsEnabled, setToolsEnabled] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [validationStatus, setValidationStatus] = useState({
-    validating: false,
-    result: null as { valid: boolean; error?: string } | null
-  });
+  const [initializing, setInitializing] = useState(true);
+  const [showApiKeyDialog, setShowApiKeyDialog] = useState(false);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  
+  const { hasRequiredKeys, apiKeys, validationResult } = useAPIKeyStore();
+  const { mode } = useChatModeStore();
+  const { 
+    messages, 
+    isLoading, 
+    toolsEnabled,
+    addMessage, 
+    updateMessage, 
+    clearMessages, 
+    setLoading,
+  } = useChatStore();
 
   useEffect(() => {
     setMounted(true);
+    const timer = setTimeout(() => {
+      setInitializing(false);
+    }, 500);
+    
+    return () => clearTimeout(timer);
   }, []);
 
-  const canChat = () => {
-    return validationStatus.result?.valid === true;
-  };
-
-  const validateApiKey = async (apiKey: string) => {
-    if (!apiKey) return;
-    
-    setValidationStatus({ validating: true, result: null });
-    
-    try {
-      const response = await fetch(`${API_BASE_URL}/validate-api-key`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ api_key: apiKey }),
-      });
-      
-      const result = await response.json();
-      setValidationStatus({ validating: false, result });
-      
-      if (result.valid) {
-        toast.success('API key validated successfully!');
-      } else {
-        toast.error(`API key validation failed: ${result.error}`);
-      }
-    } catch (error) {
-      setValidationStatus({
-        validating: false,
-        result: { valid: false, error: 'Network error' } as { valid: boolean; error?: string }  
-      });
-      toast.error('Network error during validation');
+  const handleStop = useCallback(() => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+      setLoading(false);
+      toast.info('Response generation stopped');
     }
-  };
+  }, [abortController, setLoading]);
 
-  const clearMessages = () => {
-    setMessages([]);
-    toast.success('Chat cleared');
-  };
+  const sendMessage = useCallback(async (content: string) => {
+    // Only allow if API key is validated
+    if (!hasRequiredKeys() || validationResult?.valid !== true || isLoading) return;
 
-  const addMessage = useCallback((message: { role: string; content: string; isStreaming: boolean }) => {
-    const newMessage = {
-      ...message,
-      id: Date.now().toString(),
-      timestamp: new Date(),
-    };
-    setMessages(prev => [...prev, newMessage]);
-    return newMessage.id;
-  }, []);
-
-  const updateLastMessage = useCallback((updates: { content: string; isStreaming: boolean }) => {
-    setMessages(prev => {
-      const newMessages = [...prev];
-      const lastIndex = newMessages.length - 1;
-      if (lastIndex >= 0) {
-        newMessages[lastIndex] = { ...newMessages[lastIndex], ...updates };
-      }
-      return newMessages;
-    });
-  }, []);
-
-  const sendMessage = async (content: string) => {
-    if (!canChat()) return;
-
-    setIsLoading(true);
-    addMessage({ role: 'user', content, isStreaming: false });
+    setLoading(true);
+    
+    // Add user message
+    addMessage({ role: 'user', content });
 
     // Add initial assistant message
     const assistantMessageId = addMessage({ 
@@ -107,6 +70,9 @@ const ChatInterface = () => {
       isStreaming: true 
     });
 
+    const controller = new AbortController();
+    setAbortController(controller);
+
     try {
       const response = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
@@ -114,78 +80,156 @@ const ChatInterface = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          messages: [...messages, { role: 'user', content }],
+          messages: [...messages, { role: 'user', content }].map(msg => ({
+            role: msg.role,
+            content: msg.content
+          })),
           mode,
           inception_api_key: apiKeys.inception,
-          tavily_api_key: apiKeys.tavily,
-          tools_enabled: toolsEnabled,
+          tavily_api_key: apiKeys.tavily || null,
+          tools_enabled: toolsEnabled && !!apiKeys.tavily, // Only enable if checkbox is checked AND tavily key exists
           max_tokens: 800,
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        let errorMessage = 'An error occurred while processing your request.';
+        
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.error || errorMessage;
+        } catch {
+          // Use default error message if parsing fails
+        }
+
+        if (response.status === 401) {
+          errorMessage = 'Invalid API key. Please check your credentials.';
+          toast.error('Authentication failed - Please check your API key');
+        } else if (response.status === 429) {
+          errorMessage = 'Rate limit exceeded. Please try again later.';
+          toast.error('Rate limit exceeded - Please wait before sending another message');
+        } else if (response.status >= 500) {
+          errorMessage = 'Server error occurred. Please try again.';
+          toast.error('Server error - Please try again');
+        } else {
+          toast.error(`Request failed: ${errorMessage}`);
+        }
+
+        updateMessage(assistantMessageId, {
+          content: `**Error:** ${errorMessage}`,
+          isStreaming: false,
+          isError: true
+        });
+        return;
       }
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
+      let accumulatedContent = '';
 
-      while (true) {
-        const { done, value } = await reader?.read() || { done: true, value: new Uint8Array() };
-        if (done) break;
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n');
 
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith('data: ')) continue;
-          if (trimmed === 'data: [DONE]') continue;
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith('data: ')) continue;
+            if (trimmed === 'data: [DONE]') continue;
 
-          const jsonStr = trimmed.substring(6);
-          if (!jsonStr.startsWith('{')) continue;
+            const jsonStr = trimmed.substring(6);
+            if (!jsonStr.startsWith('{')) continue;
 
-          try {
-            const data = JSON.parse(jsonStr);
-            
-            if (data.error) {
-              updateLastMessage({
-                content: `Error: ${data.error}`,
-                isStreaming: false
-              });
-              break;
+            try {
+              const data = JSON.parse(jsonStr);
+              
+              if (data.error) {
+                throw new Error(data.error);
+              }
+              
+              if (data.content !== undefined) {
+                if (mode === 'streaming') {
+                  // Streaming: accumulate content
+                  accumulatedContent += data.content;
+                  updateMessage(assistantMessageId, {
+                    content: accumulatedContent,
+                    isStreaming: true
+                  });
+                } else {
+                  // Diffusing: replace entire content
+                  updateMessage(assistantMessageId, {
+                    content: data.content || '',
+                    isStreaming: true
+                  });
+                }
+              }
+            } catch (parseError: any) {
+              console.error('JSON parsing error:', parseError);
+              toast.error('Failed to parse response data');
             }
-            
-            if (data.content !== undefined) {
-              updateLastMessage({
-                content: data.content,
-                isStreaming: true
-              });
-            }
-          } catch (error) {
-            console.error('JSON parsing error:', error);
           }
         }
       }
 
-      updateLastMessage({ content: '', isStreaming: false });
+      // Mark as complete
+      updateMessage(assistantMessageId, { isStreaming: false });
+      toast.success('Response completed');
 
-    } catch (error) {
+    } catch (error: any) {
+      let errorMessage = 'An unexpected error occurred.';
+      
+      if (error.name === 'AbortError') {
+        updateMessage(assistantMessageId, {
+          content: '**Response cancelled by user.**',
+          isStreaming: false
+        });
+        return;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
       console.error('Chat error:', error);
-      updateLastMessage({
-        content: 'Sorry, an error occurred while processing your request.',
-        isStreaming: false
+      toast.error(`Chat error: ${errorMessage}`);
+      
+      updateMessage(assistantMessageId, {
+        content: `**Error:** ${errorMessage}`,
+        isStreaming: false,
+        isError: true
       });
     } finally {
-      setIsLoading(false);
+      setLoading(false);
+      setAbortController(null);
     }
-  };
+  }, [hasRequiredKeys, validationResult, isLoading, messages, mode, apiKeys, toolsEnabled, addMessage, updateMessage, setLoading]);
 
-  if (!mounted) {
-    return null;
+  if (!mounted || initializing) {
+    return (
+      <div className="flex flex-col h-screen bg-background">
+        <header className="border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-10">
+          <div className="max-w-5xl mx-auto px-6 py-4">
+            <div className="flex items-center justify-between">
+              <h1 className="text-2xl font-bold">
+                dLLM <span className="text-primary">Chat</span>
+              </h1>
+              <div className="h-9 w-9 bg-muted rounded-md animate-pulse" />
+            </div>
+          </div>
+        </header>
+        <main className="flex-1 flex items-center justify-center p-4">
+          <div className="max-w-4xl w-full">
+            <LoadingSkeleton />
+          </div>
+        </main>
+      </div>
+    );
   }
 
-  if (!canChat()) {
+  if (!hasRequiredKeys() || validationResult?.valid !== true) {
     return (
       <div className="flex flex-col h-screen bg-background">
         <header className="border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-10">
@@ -200,13 +244,10 @@ const ChatInterface = () => {
         </header>
 
         <main className="flex-1 flex items-center justify-center p-4">
-          <ApiKeySetup 
-            apiKeys={apiKeys} 
-            onApiKeysChange={setApiKeys}
-            onValidate={validateApiKey}
-            validationStatus={validationStatus}
-          />
+          <ApiKeySetup />
         </main>
+        
+        <ChatInput onSendMessage={sendMessage} onStop={handleStop} disabled={isLoading} />
       </div>
     );
   }
@@ -221,43 +262,12 @@ const ChatInterface = () => {
             </h1>
             
             <div className="flex items-center gap-4">
-              <div className="flex bg-muted rounded-lg p-1">
-                <Button
-                  onClick={() => setMode('streaming')}
-                  variant={mode === 'streaming' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="flex items-center gap-2 h-8 px-3 text-xs"
-                >
-                  <Zap className="h-3 w-3" />
-                  Streaming
-                </Button>
-                <Button
-                  onClick={() => setMode('diffusing')}
-                  variant={mode === 'diffusing' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="flex items-center gap-2 h-8 px-3 text-xs"
-                >
-                  <Waves className="h-3 w-3" />
-                  Diffusing
-                </Button>
-              </div>
-
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={toolsEnabled}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setToolsEnabled(e.target.checked)}
-                  disabled={!apiKeys.tavily}
-                  className="rounded"
-                />
-                <span className={apiKeys.tavily ? 'text-foreground' : 'text-muted-foreground'}>
-                  🔍 Web Search
-                </span>
-              </label>
-
               {messages.length > 0 && (
                 <Button
-                  onClick={clearMessages}
+                  onClick={() => {
+                    clearMessages();
+                    toast.success('Chat cleared');
+                  }}
                   variant="ghost"
                   size="sm"
                   className="flex items-center gap-2 h-9 px-3 text-sm text-muted-foreground hover:text-foreground"
@@ -267,7 +277,7 @@ const ChatInterface = () => {
                 </Button>
               )}
 
-              <Dialog open={showApiSetup} onOpenChange={setShowApiSetup}>
+              <Dialog open={showApiKeyDialog} onOpenChange={setShowApiKeyDialog}>
                 <DialogTrigger asChild>
                   <Button
                     variant="ghost"
@@ -282,12 +292,7 @@ const ChatInterface = () => {
                   <DialogHeader>
                     <DialogTitle>API Key Settings</DialogTitle>
                   </DialogHeader>
-                  <ApiKeySetup 
-                    apiKeys={apiKeys} 
-                    onApiKeysChange={setApiKeys}
-                    onValidate={validateApiKey}
-                    validationStatus={validationStatus}
-                  />
+                  <ApiKeySetup />
                 </DialogContent>
               </Dialog>
 
@@ -299,37 +304,10 @@ const ChatInterface = () => {
 
       <main className="flex-1 relative">
         <div className="flex flex-col w-full max-w-4xl pt-12 pb-44 mx-auto px-6">
-          {messages.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center">
-                <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
-                  mode === 'streaming' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'
-                }`}>
-                  {mode === 'streaming' ? <Zap className="h-8 w-8" /> : <Waves className="h-8 w-8" />}
-                </div>
-                <h3 className="text-lg font-medium text-foreground mb-2">
-                  {mode === 'streaming' ? 'Streaming Mode' : 'Diffusing Mode'}
-                </h3>
-                <p className="text-muted-foreground max-w-md">
-                  {mode === 'streaming' 
-                    ? 'Experience progressive AI responses as they build up token by token.'
-                    : 'Watch AI responses evolve and rewrite themselves in real-time.'
-                  }
-                </p>
-                {toolsEnabled && <p className="text-sm text-green-600 mt-2">🔍 Web search enabled</p>}
-                <p className="text-sm text-muted-foreground mt-4">Start a conversation below!</p>
-              </div>
-            </div>
-          ) : (
-            <MessageList messages={messages} mode={mode} isStreaming={isLoading} />
-          )}
+          <Messages messages={messages} isLoading={isLoading} />
         </div>
         
-        <MessageInput
-          onSendMessage={sendMessage}
-          isLoading={isLoading}
-          disabled={!canChat()}
-        />
+        <ChatInput onSendMessage={sendMessage} onStop={handleStop} disabled={isLoading} />
       </main>
     </div>
   );
