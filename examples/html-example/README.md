@@ -8,6 +8,11 @@ This directory contains two simple HTML examples demonstrating how to interact w
 
 This example shows how to get a streaming response from a dLLM model through the OpenRouter API. As the model generates tokens, they are appended to the response area, showing the progressive build-up of the answer.
 
+## Demo Video:
+https://github.com/user-attachments/assets/80e446f8-8f74-419a-9cbf-bbcd599cde97
+
+
+
 -   **API:** OpenRouter API
 -   **Model:** `inception/mercury-coder-small-beta`
 -   **Authentication:** Requires an OpenRouter API key.
@@ -15,6 +20,11 @@ This example shows how to get a streaming response from a dLLM model through the
 ### 2. `diffusion_example.html`
 
 This example demonstrates the "diffusing" feature, which is unique to Inception Labs' models. Instead of just appending tokens, the entire response is rewritten and refined with each update from the model. This provides a fascinating look into the model's "thought process".
+
+## Demo Video:
+https://github.com/user-attachments/assets/74141f64-1764-4655-b9ac-93199287ae72
+
+
 
 -   **API:** Inception Labs API (Direct)
 -   **Model:** `mercury-coder`
