@@ -2,6 +2,9 @@
 
 This directory contains a full-stack application demonstrating how to build a chat interface for dLLM using FastAPI as the backend and React (with Vite) as the frontend. This example showcases both streaming and diffusing modes, along with tool integration for web search.
 
+## Demo Video
+https://github.com/user-attachments/assets/2d57e225-2c8f-4271-9166-7afa7fde1ead
+
 ## Architecture
 
 - **Backend**: FastAPI with Python, providing REST API endpoints
