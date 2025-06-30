@@ -245,7 +245,7 @@ export default function ChatInterface() {
         <div className="max-w-5xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold">
-              dLLM <span className="text-primary">Chat</span>
+              dLLM  <span className="text-primary">Chat</span>
             </h1>
             
             <div className="flex items-center gap-4">

@@ -80,7 +80,7 @@ def get_tool_calls_without_diffusing(messages: List[Dict], api_key: str) -> Tupl
         payload = {
             "model": "mercury-coder",
             "messages": messages,
-            "max_tokens": 800,
+            "max_tokens": 4000,
             "stream": True,
             "diffusing": False,
             "tools": get_tools()
@@ -156,7 +156,7 @@ def stream_inception_response(messages: List[Dict], api_key: str, diffusing: boo
         payload = {
             "model": "mercury-coder",
             "messages": messages,
-            "max_tokens": 800,
+            "max_tokens": 4000,
             "stream": True,
             "diffusing": diffusing
         }

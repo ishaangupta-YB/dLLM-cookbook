@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     const requestBody: any = {
       model,
       messages: conversationMessages,
-      max_tokens: 500,
+      max_tokens: 8000,
       stream: true,
       temperature: 0.7,
     };
